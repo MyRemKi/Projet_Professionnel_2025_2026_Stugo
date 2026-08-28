@@ -1,0 +1,649 @@
+classDiagram
+
+%% ═══════════════════════════════════════════════════════════
+%%  DOMAIN — Value Objects & Interfaces
+%% ═══════════════════════════════════════════════════════════
+
+    class ChartConfig {
+        +chart_type : str
+        +x_col : str
+        +y_col : str
+        +group_col : str
+        +top_n : int
+        +mode_3d : bool
+        +elev : int
+        +azim : int
+        +default()$ ChartConfig
+        +with_type(t) ChartConfig
+        +with_3d(elev, azim) ChartConfig
+        +as_2d() ChartConfig
+    }
+
+    class ColorValue {
+        +hex : str
+        +from_rgb(r,g,b)$ ColorValue
+        +darkened(factor) ColorValue
+        +lightened(factor) ColorValue
+        +hue_shifted(deg) ColorValue
+        +to_rgb() tuple
+        +contrast_text() ColorValue
+    }
+
+    class ISessionRepository {
+        <<interface>>
+        +load_session() dict
+        +save_session(data) bool
+        +clear_session() bool
+        +get_session_dir() str
+    }
+
+    class IPreferencesRepository {
+        <<interface>>
+        +load() dict
+        +save(data) bool
+    }
+
+%% ═══════════════════════════════════════════════════════════
+%%  INFRASTRUCTURE — Persistence
+%% ═══════════════════════════════════════════════════════════
+
+    class SessionRepository {
+        <<Singleton>>
+        -_instance : SessionRepository$
+        -session_file : str
+        +instance()$ SessionRepository
+        +load_session() dict
+        +save_session(data) bool
+        +clear_session() bool
+        +get_session_dir() str
+    }
+
+    class PreferencesRepository {
+        <<Singleton>>
+        -_instance : PreferencesRepository$
+        -prefs_file : str
+        +instance()$ PreferencesRepository
+        +load() dict
+        +save(data) bool
+    }
+
+    SessionRepository ..|> ISessionRepository
+    PreferencesRepository ..|> IPreferencesRepository
+
+%% ═══════════════════════════════════════════════════════════
+%%  INFRASTRUCTURE — Extractors
+%% ═══════════════════════════════════════════════════════════
+
+    class ExtractorFactory {
+        +HANDLERS : dict$
+        +get(extension)$ Callable
+        +register(ext, handler)$
+        +supported()$ list
+    }
+
+    class ExcelExtractor {
+        <<module>>
+        +extract_all_sheets(paths, existing) tuple
+        -validate_sheet(raw, name, path)
+        -extract_rows(raw, uid, path, name) list
+        -extract_summary(raw) dict
+    }
+
+    class CsvExtractor {
+        <<module>>
+        +extract_from_csv(paths, existing) tuple
+    }
+
+    ExtractorFactory --> ExcelExtractor : delegates
+    ExtractorFactory --> CsvExtractor : delegates
+
+%% ═══════════════════════════════════════════════════════════
+%%  INFRASTRUCTURE — Model
+%% ═══════════════════════════════════════════════════════════
+
+    class PandasModel {
+        +COLS : list$
+        -df : DataFrame
+        -font : QFont
+        +rowCount() int
+        +columnCount() int
+        +data(index, role) Any
+        +headerData(section, orient, role) Any
+        +sort(column, order)
+        +update_df(df)
+    }
+
+    PandasModel --|> QAbstractTableModel
+
+%% ═══════════════════════════════════════════════════════════
+%%  APP — Events
+%% ═══════════════════════════════════════════════════════════
+
+    class EventBus {
+        <<Singleton>>
+        -_instance : EventBus$
+        -subscribers : dict
+        +instance()$ EventBus
+        +publish(event_type, payload)
+        +subscribe(event_type, handler)
+        +unsubscribe(event_type, handler)
+    }
+
+    class AppState {
+        <<Singleton>>
+        -state : AppStateEnum
+        +instance()$ AppState
+        +current : AppStateEnum
+        +transition(new_state)
+        +is_ready() bool
+        +is_loading() bool
+    }
+
+    class AppStateEnum {
+        <<enumeration>>
+        IDLE
+        LOADING
+        READY
+        ERROR
+    }
+
+    AppState --> AppStateEnum
+    EventBus --|> QObject
+    AppState --|> QObject
+
+%% ═══════════════════════════════════════════════════════════
+%%  APP — Commands
+%% ═══════════════════════════════════════════════════════════
+
+    class Command {
+        <<abstract>>
+        +execute() bool
+        +undo() bool
+        +can_undo() bool
+        +description : str
+    }
+
+    class CommandHistory {
+        -done : list
+        -max : int
+        +execute(cmd) bool
+        +undo_last() bool
+        +clear()
+    }
+
+    class LoadFilesCommand {
+        -paths : list
+        -svc : DataService
+        -loaded : set
+        +execute() bool
+        +undo() bool
+        +can_undo() bool
+    }
+
+    class ApplyFilterCommand {
+        -sidebar : FilterSidebar
+        -svc : DataService
+        +execute() bool
+    }
+
+    Command <|-- LoadFilesCommand
+    Command <|-- ApplyFilterCommand
+    CommandHistory --> Command : manages
+
+%% ═══════════════════════════════════════════════════════════
+%%  APP — Services
+%% ═══════════════════════════════════════════════════════════
+
+    class DataService {
+        <<Singleton>>
+        -df_all : DataFrame
+        -summaries : dict
+        -loaded_uids : set
+        +instance()$ DataService
+        +df_all : DataFrame
+        +summaries : dict
+        +loaded_uids : set
+        +load_files(paths) set
+        +remove_file(uid)
+        +filtered_df(sidebar, sort, asc) DataFrame
+        +reset()
+    }
+
+    class ChartService {
+        +render(fig, df, chart_type, x_col, y_col, group_col, top_n, mode_3d, elev, azim)$
+    }
+
+    class ExportService {
+        +export_png(fig, parent)$ bool
+        +export_csv(df, parent)$ bool
+    }
+
+    DataService --> ExtractorFactory : uses
+    DataService --> PandasModel : wraps
+    LoadFilesCommand --> DataService : uses
+    ApplyFilterCommand --> DataService : uses
+
+%% ═══════════════════════════════════════════════════════════
+%%  RENDERING
+%% ═══════════════════════════════════════════════════════════
+
+    class RendererFactory {
+        +get(mode_3d)$ Callable
+        +render(fig, df, ...)$
+    }
+
+    class Renderer2D {
+        <<module>>
+        +render_chart(fig, df, ...)
+        +render_bar(...)
+        +render_pie(...)
+        +render_area(...)
+        +render_treemap(...)
+    }
+
+    class Renderer3D {
+        <<module>>
+        +render_chart_3d(fig, df, ...)
+        +render_bar_3d(...)
+        +render_pie_3d(...)
+        +render_area_3d(...)
+        +setup_3d_axes(ax, fig)
+        +zoom_3d_axes(ax, zoom)
+        +finalize_3d_layout(fig)
+    }
+
+    class Cube3D {
+        <<module>>
+        +build_cube_faces(x,y,z,dx,dy,dz,color) tuple
+        +cube_center(x,y,z,dx,dy,dz) tuple
+        +draw_cubes_batch(ax, cubes)
+    }
+
+    class Pie3D {
+        <<module>>
+        +build_pie3d_faces(t1,t2,color,explode) tuple
+        +draw_pie3d_all(ax, wedges)
+    }
+
+    RendererFactory --> Renderer2D
+    RendererFactory --> Renderer3D
+    Renderer3D --> Cube3D
+    Renderer3D --> Pie3D
+    ChartService --> RendererFactory
+
+%% ═══════════════════════════════════════════════════════════
+%%  SHARED — Utilities & Logging
+%% ═══════════════════════════════════════════════════════════
+
+    class ActionLogger {
+        <<Singleton>>
+        -logs : list
+        -_instance : ActionLogger$
+        +instance()$ ActionLogger
+        +log(action_type, message) dict
+        +get_logs() list
+        +clear()
+        +to_json() str
+        +from_json(data)
+    }
+
+    class FileLogger {
+        <<Singleton>>
+        -today : str
+        -path : str
+        +instance()$ FileLogger
+        +log(context, message)
+    }
+
+    class ThemeManager {
+        <<Singleton>>
+        +theme_changed : Signal
+        -_instance : ThemeManager$
+        +instance()$ ThemeManager
+        +apply(name, app)
+        +register_preset(name, colors)
+    }
+
+    class StylesheetBuilder {
+        +build()$ str
+    }
+
+    class ScalingService {
+        <<Singleton>>
+        +dpi_scale : float
+        +sidebar_w : int
+        +filter_w : int
+        +font_base : int
+        +spacing_md : int
+        +init(app)$
+    }
+
+    ThemeManager --|> QWidget
+    ThemeManager --> StylesheetBuilder
+
+%% ═══════════════════════════════════════════════════════════
+%%  PRESENTATION — Main Window
+%% ═══════════════════════════════════════════════════════════
+
+    class MainWindow {
+        -_app : QApplication
+        -df_all : DataFrame
+        -summaries : dict
+        -loaded_uids : set
+        -dirty : bool
+        -current_page : str
+        +sidebar : Sidebar
+        +filter_sidebar : FilterSidebar
+        +log_panel : LogSessionPanel
+        +home_page : HomePage
+        +import_page : ImportPage
+        +table_page : TablePage
+        +chart_page : ChartPage
+        +comparison_page : ComparisonPage
+        +settings_page : SettingsPage
+        +help_page : HelpPage
+        +__init__(app)
+        -build_ui()
+        -nav(key)
+        -load_files(paths)
+        -remove_file(uid)
+        -find_cross_duplicates(uids) list
+        -apply_filters()
+        -export_csv()
+        -save_session()
+        -try_auto_resume()
+        -update_export_btn()
+        +closeEvent(event)
+    }
+
+    class SplashScreen {
+        +__init__(parent)
+    }
+
+    MainWindow --|> QMainWindow
+    SplashScreen --|> QSplashScreen
+    MainWindow --> Sidebar
+    MainWindow --> FilterSidebar
+    MainWindow --> LogSessionPanel
+    MainWindow --> DataService
+    MainWindow --> SessionRepository
+    MainWindow --> ActionLogger
+
+%% ═══════════════════════════════════════════════════════════
+%%  PRESENTATION — Pages
+%% ═══════════════════════════════════════════════════════════
+
+    class HomePage {
+        +navigate_to : Signal
+        +update_stats(df, n_files, n_exports)
+    }
+
+    class ImportPage {
+        +files_added : Signal
+        +file_removed : Signal
+        +add_file(uid, label, path, df)
+    }
+
+    class TablePage {
+        +combo_sort : QComboBox
+        +btn_sort_dir : QPushButton
+        +btn_csv : QPushButton
+        +update_df(df)
+    }
+
+    class ChartPage {
+        -df : DataFrame
+        +controls : ChartControls
+        -fig : Figure
+        -canvas : FigureCanvas
+        +update_data(df)
+        -refresh()
+        -save()
+    }
+
+    class ComparisonPage {
+        -df : DataFrame
+        +update_data(df)
+    }
+
+    class SettingsPage {
+        -app_ref : QApplication
+        -current_theme : str
+        -cursor : CursorSettingsWidget
+        -custom_editor : CustomPresetEditor
+        +set_app(app)
+        +restore_cursor()
+    }
+
+    class HelpPage {
+    }
+
+    HomePage --|> QWidget
+    ImportPage --|> QWidget
+    TablePage --|> QWidget
+    ChartPage --|> QWidget
+    ComparisonPage --|> QWidget
+    SettingsPage --|> QWidget
+    HelpPage --|> QWidget
+
+    MainWindow --> HomePage
+    MainWindow --> ImportPage
+    MainWindow --> TablePage
+    MainWindow --> ChartPage
+    MainWindow --> ComparisonPage
+    MainWindow --> SettingsPage
+    MainWindow --> HelpPage
+
+    TablePage --> PandasModel
+    ChartPage --> ChartControls
+    ChartPage --> ChartService
+
+%% ═══════════════════════════════════════════════════════════
+%%  PRESENTATION — Settings sub-widgets
+%% ═══════════════════════════════════════════════════════════
+
+    class CursorSettingsWidget {
+        +app_ref : QApplication
+        +custom_path : str
+        +combo : QComboBox
+        +btn_browse : QPushButton
+        +lbl_path : QLabel
+        +set_app(app)
+        +restore_cursor_prefs()
+        +browse()
+        +apply_cursor(name, path)
+        +on_sel(name)
+        +reset()
+        +save(name, path)
+    }
+
+    class CustomPresetEditor {
+        +app_ref : QApplication
+        +working : dict
+        +color_btns : dict
+        +set_app(app)
+        +on_group(g)
+        +rebuild_grid(keys)
+        +pick(key)
+        +build_full() dict
+        +preview()
+        +save()
+        +load()
+    }
+
+    CursorSettingsWidget --|> QWidget
+    CustomPresetEditor --|> QWidget
+    SettingsPage --> CursorSettingsWidget
+    SettingsPage --> CustomPresetEditor
+
+%% ═══════════════════════════════════════════════════════════
+%%  PRESENTATION — Sidebar
+%% ═══════════════════════════════════════════════════════════
+
+    class Sidebar {
+        +page_changed : Signal
+        -buttons : dict
+        -current : str
+        +set_page(key)
+        -on(key)
+        -restyle()
+    }
+
+    class NavButton {
+        -page_key : str
+        -active : bool
+        +set_active(active)
+    }
+
+    class FilterSidebar {
+        +filter_changed : Signal
+        -chk_faculties : dict
+        -chk_zones : dict
+        +refresh_faculties(df)
+        +apply(df) DataFrame
+        +reset_filters()
+        +get_state() dict
+        +restore_state(state)
+    }
+
+    class LogSessionPanel {
+        +save_requested : Signal
+        +resume_requested : Signal
+        +refresh()
+        +update_session_info(ts)
+    }
+
+    Sidebar --|> QWidget
+    NavButton --|> QPushButton
+    FilterSidebar --|> QWidget
+    LogSessionPanel --|> QWidget
+    Sidebar --> NavButton : contains
+
+%% ═══════════════════════════════════════════════════════════
+%%  PRESENTATION — Widgets
+%% ═══════════════════════════════════════════════════════════
+
+    class ChartControls {
+        +changed : Signal
+        -_mode_3d : bool
+        -_elev : int
+        -_azim : int
+        +btn_2d : QPushButton
+        +btn_3d : QPushButton
+        +combo_chart : QComboBox
+        +combo_x : QComboBox
+        +combo_y : QComboBox
+        +spin_topn : StepWidget
+        +sld_elev : QSlider
+        +sld_azim : QSlider
+        +mode_3d : bool «property»
+        +elev : int «property»
+        +azim : int «property»
+        +chart_type : str
+        +x_col : str
+        +y_col : str
+        +top_n : int
+        +set_compat_msg(msg)
+    }
+    note for ChartControls "mode_3d/elev/azim keep a leading underscore\non the backing field because a @property of the\nsame public name already exists -- stripping it\nwould shadow the property and crash on assignment"
+
+    class StepWidget {
+        +valueChanged : Signal
+        +val : float
+        +lo : float
+        +hi : float
+        +step : float
+        +dec_digits : int
+        +value() float
+        +setValue(v)
+        +setRange(lo, hi)
+    }
+
+    class PrimaryButton {
+        +__init__(text, icon_char)
+    }
+
+    class DangerButton {
+        +__init__(text)
+    }
+
+    ChartControls --|> QWidget
+    StepWidget --|> QWidget
+    PrimaryButton --|> QPushButton
+    DangerButton --|> QPushButton
+    ChartControls --> StepWidget
+
+%% ═══════════════════════════════════════════════════════════
+%%  ADMIN APP (Admin_Logs.exe)
+%% ═══════════════════════════════════════════════════════════
+
+    class LogViewerWindow {
+        -folder : str
+        -files : list
+        -header : HeaderBar
+        -file_panel : FileListPanel
+        -entry_panel : EntryTable
+        -browse()
+        -load_folder(folder)
+        -on_file_selected(row)
+    }
+
+    class HeaderBar {
+        +set_folder(path)
+    }
+
+    class FileListPanel {
+        -list_widget : QListWidget
+        +populate(files)
+    }
+
+    class EntryTable {
+        -table : QTableWidget
+        -all_entries : list
+        +show_file(file_info)
+        +clear()
+        -apply_filter(text)
+        -render(entries)
+    }
+
+    class LogTableModel_Admin {
+        +logs : list
+        +light_mode : bool
+        +set_logs(logs)
+    }
+
+    class LogFilterProxy_Admin {
+        +search : str
+        +module : str
+        +date : str
+        +filterAcceptsRow(row, parent) bool
+    }
+
+    class Badge {
+    }
+
+    LogViewerWindow --|> QMainWindow
+    HeaderBar --|> QWidget
+    FileListPanel --|> QWidget
+    EntryTable --|> QWidget
+    Badge --|> QLabel
+    LogTableModel_Admin --|> QAbstractTableModel
+    LogFilterProxy_Admin --|> QSortFilterProxyModel
+
+    LogViewerWindow --> HeaderBar
+    LogViewerWindow --> FileListPanel
+    LogViewerWindow --> EntryTable
+    FileListPanel --> LogTableModel_Admin
+    FileListPanel --> LogFilterProxy_Admin
+
+%% ═══════════════════════════════════════════════════════════
+%%  Relations transverses
+%% ═══════════════════════════════════════════════════════════
+
+    ThemeManager --> ScalingService : reads
+    DataService --> SessionRepository : via compat
+    ExportService --> ActionLogger : logs action
+    ChartPage --> ExportService : export PNG
+    TablePage --> ExportService : export CSV
+    LogSessionPanel --> ActionLogger : reads logs
+    FilterSidebar --> DataService : apply returns df

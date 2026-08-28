@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.pyo
+.ropeproject/
+dist/
+build/
+logs/*.txt
+.claude/
+
+# too large for a normal git push (GitHub's 100MB per-file limit) -- distribute
+# this via a GitHub Release asset instead (see project notes)
+StuGoCO2_Setup_v6.1.exe

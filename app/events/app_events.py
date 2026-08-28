@@ -1,0 +1,11 @@
+# Noms des evenements que l'application peut envoyer sur le bus d'evenements
+DATA_LOADED     = "data.loaded"
+DATA_FILTERED   = "data.filtered"
+FILE_REMOVED    = "file.removed"
+SESSION_SAVED   = "session.saved"
+SESSION_RESUMED = "session.resumed"
+THEME_CHANGED   = "theme.changed"
+EXPORT_PNG      = "export.png"
+EXPORT_CSV      = "export.csv"
+NAV_CHANGED     = "nav.changed"
+ERROR_OCCURRED  = "error.occurred"
